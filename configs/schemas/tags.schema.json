@@ -1,0 +1,86 @@
+{
+  "$defs": {
+    "ContextTags": {
+      "additionalProperties": false,
+      "description": "Null = unknown; false = an explicit negative decision.",
+      "properties": {
+        "event": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Event"
+        },
+        "ministry_trip": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ministry Trip"
+        },
+        "family": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Family"
+        }
+      },
+      "required": [
+        "event",
+        "ministry_trip",
+        "family"
+      ],
+      "title": "ContextTags",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "people_count_bucket": {
+      "enum": [
+        "0",
+        "1",
+        "2-3",
+        "4-6",
+        "7-9",
+        "10+",
+        "unknown"
+      ],
+      "title": "People Count Bucket",
+      "type": "string"
+    },
+    "capture_style": {
+      "enum": [
+        "candid",
+        "staged",
+        "mixed",
+        "unknown"
+      ],
+      "title": "Capture Style",
+      "type": "string"
+    },
+    "contexts": {
+      "$ref": "#/$defs/ContextTags"
+    }
+  },
+  "required": [
+    "people_count_bucket",
+    "capture_style",
+    "contexts"
+  ],
+  "title": "Tags",
+  "type": "object"
+}

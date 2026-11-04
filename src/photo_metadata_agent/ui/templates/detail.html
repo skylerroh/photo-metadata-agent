@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<a href="/">← Back to library</a>
+<div class="section-title"><h1>{{ job.filename }}</h1><span class="badge">{{ job.status | replace('_', ' ') }}</span></div>
+<div class="review-layout" data-status="{{ job.status }}" data-job-id="{{ job.id }}">
+<section><img class="review-image" src="/jobs/{{ job.id }}/preview" alt="Photo being reviewed">
+<p><strong>Album context:</strong> {{ job.spec.context or 'None supplied' }}</p>
+<p class="muted">{{ job.spec.provider }} · {{ job.spec.model }}</p>
+{% if job.spec.provider == 'demo' %}<p class="notice">Demo run: no inference was performed.</p>{% endif %}
+{% if job.error %}<p class="error" role="alert">{{ job.error }}</p>{% endif %}
+{% if job.status in ['queued','running','queued_review'] %}<p role="status">Waiting for the local worker. This page updates when the job status changes.</p>{% endif %}
+{% if job.status == 'failed' or job.status == 'completed' %}<form action="/jobs/{{ job.id }}/rerun" method="post"><button>Queue a new run with current settings</button></form>{% endif %}
+</section>
+<section class="panel">
+{% if tags %}<h2>{% if job.reviews %}Reviewed tags{% else %}Verify the generated tags{% endif %}</h2>
+<p>Unknown means insufficient evidence. Context categories can overlap.</p>
+<form action="/jobs/{{ job.id }}/review" method="post">
+<fieldset {% if job.status != 'needs_review' %}disabled{% endif %}>
+<label>People in the image<select name="people_count_bucket">{% for bucket in buckets %}<option {% if tags.people_count_bucket == bucket %}selected{% endif %}>{{ bucket }}</option>{% endfor %}</select></label>
+<label>Capture style<select name="capture_style">{% for style in styles %}<option {% if tags.capture_style == style %}selected{% endif %}>{{ style }}</option>{% endfor %}</select></label>
+{% for field, value in tags.contexts.items() %}<label>{{ field | replace('_', ' ') | capitalize }}<select name="{{ field }}">{% for key, label in [('unknown','Unknown'),('yes','Yes'),('no','No')] %}<option value="{{ key }}" {% if (value is none and key == 'unknown') or (value is sameas true and key == 'yes') or (value is sameas false and key == 'no') %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>{% endfor %}
+<label>Annotation notes<textarea name="notes" maxlength="4000" placeholder="Explain corrections or ambiguous cases">{{ job.reviews[-1].notes if job.reviews else '' }}</textarea></label>
+<button>Save reviewed tags</button></fieldset>
+</form>
+{% if job.reviews %}<a class="button" href="/jobs/{{ job.id }}/metadata.xmp">Download XMP keywords</a>{% endif %}
+<details><summary>Original prediction and run details</summary><pre>{{ job.prediction | tojson(indent=2) }}</pre><p>Schema {{ job.spec.schema_version }} · Questions {{ job.spec.questions.version }} · Harness {{ job.spec.harness_version }}</p></details>
+{% else %}<h2>Tags will appear here</h2><p>Once the worker finishes inference, review and adjust each field.</p>{% endif %}
+</section></div>
+{% endblock %}

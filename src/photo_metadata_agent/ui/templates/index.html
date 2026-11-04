@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="intro"><p class="eyebrow">A library you can find again</p>
+<h1>Give your photos useful context.</h1>
+<p>Generate category tags, review every decision, and keep your corrections for better evaluations.</p></section>
+<section class="panel"><h2>Import a photo</h2>
+<p>Provider: <strong>{{ settings.provider }}</strong> · Model: {{ settings.model }}</p>
+{% if settings.provider == 'demo' %}<p class="notice">Demo mode makes no model calls. Tags start as unknown for manual annotation.</p>{% endif %}
+<form action="/imports" method="post" enctype="multipart/form-data">
+<label>Image<input type="file" name="image" accept="image/*" required></label>
+<label>Album or occasion context<textarea name="context" maxlength="4000" placeholder="For example: our family reunion, or a ministry trip in June"></textarea></label>
+<button>Import and queue tagging</button>
+</form><p class="muted">The local worker must be running to process jobs.</p></section>
+<section><div class="section-title"><h2>Your review queue</h2><a href="/evals.jsonl">Download evaluation labels</a></div>
+<form class="filters" method="get"><input name="q" value="{{ q }}" aria-label="Search filenames and tags" placeholder="Search filenames or tags, e.g. people:4-6">
+<select name="status" aria-label="Filter status"><option value="">All statuses</option>{% for item in ['queued','running','needs_review','queued_review','completed','failed'] %}<option value="{{ item }}" {% if status == item %}selected{% endif %}>{{ item | replace('_', ' ') }}</option>{% endfor %}</select><button>Filter</button></form>
+<p class="muted">Showing matches within the latest 100 runs.</p>
+<div class="grid">{% for job in jobs %}<a class="card" href="/jobs/{{ job.id }}"><img src="/jobs/{{ job.id }}/preview" alt="{{ job.filename }}" loading="lazy"><div><strong>{{ job.filename }}</strong><p class="badge">{{ job.status | replace('_', ' ') }}</p>{% if job.effective_tags %}<p>{{ job.effective_tags.people_count_bucket }} people · {{ job.effective_tags.capture_style }}</p>{% endif %}</div></a>{% else %}<p>No matching photos yet. Import one above or use the directory importer.</p>{% endfor %}</div>
+</section>
+{% endblock %}
