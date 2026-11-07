@@ -1,0 +1,16 @@
+{
+  "version": "photo-tags-v1",
+  "people_count_bucket": {
+    "instructions": "How many real people are visibly present in the photo? Count partially visible people; exclude pictures of people. Choose unknown when occlusion or image quality prevents a reliable bucket.",
+    "criteria": {"0": "No people", "1": "One person", "2-3": "Two or three people", "4-6": "Four to six people", "7-9": "Seven to nine people", "10+": "Ten or more people", "unknown": "Cannot reliably determine the bucket"}
+  },
+  "capture_style": {
+    "instructions": "Does the photo appear candid or deliberately posed? Use mixed when both are substantial and unknown when intent cannot be determined.",
+    "criteria": {"candid": "Unposed activity", "staged": "Deliberate posing or arrangement", "mixed": "Both posed and unposed subjects", "unknown": "Insufficient evidence"}
+  },
+  "contexts": {
+    "event": "Is this photo part of an organized event? Use supplied album context and visible evidence. Missing evidence is unknown, not false.",
+    "ministry_trip": "Does supplied context explicitly establish this photo as part of a ministry trip? Do not infer religious affiliation from appearance. Missing context is unknown, not false.",
+    "family": "Does supplied context explicitly establish a family occasion or family relationship? Do not infer kinship from appearance. Missing context is unknown, not false."
+  }
+}

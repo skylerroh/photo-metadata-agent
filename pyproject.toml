@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "photo-metadata-agent"
+version = "0.1.0"
+description = "A personal, reviewable image tagging workflow with swappable multimodal models."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115,<1", "uvicorn>=0.30,<1", "jinja2>=3.1.6,<4",
+  "python-multipart>=0.0.20,<1", "pydantic>=2.10,<3", "pydantic-settings>=2.7,<3",
+  "python-dotenv>=1,<2", "pillow>=11,<13", "httpx>=0.28,<1", "langgraph>=1,<2",
+  "langgraph-checkpoint-sqlite>=3,<4", "filelock>=3.16,<4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "ruff>=0.11,<1", "build>=1.2,<2"]
+heic = ["pillow-heif>=0.21,<2"]
+
+[project.scripts]
+photo-agent = "photo_metadata_agent.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/photo_metadata_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.File", "fastapi.Form"]

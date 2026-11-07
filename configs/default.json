@@ -1,0 +1,9 @@
+{
+  "note": "Reference defaults; runtime settings come from PHOTO_AGENT_* environment variables or .env.",
+  "provider": "demo",
+  "model": "demo-v1",
+  "data_dir": "./data",
+  "typesafe_images_enabled": false,
+  "max_attempts": 2,
+  "timeout_seconds": 120
+}
