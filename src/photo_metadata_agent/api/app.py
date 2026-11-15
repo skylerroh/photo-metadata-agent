@@ -1,17 +1,24 @@
 import hmac
+import mimetypes
 from importlib.resources import files
+from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from photo_metadata_agent.domain.schemas import ContextTags, Review, Tags
+from photo_metadata_agent.inference.contracts import ProviderError
+from photo_metadata_agent.ingestion.video import VIDEO_EXTENSIONS
 from photo_metadata_agent.metadata.writers import export_sidecar
-from photo_metadata_agent.services.catalog import import_image, make_spec
+from photo_metadata_agent.services.catalog import import_media, make_spec
 from photo_metadata_agent.services.evaluation import export_jsonl, metrics
+from photo_metadata_agent.services.media import video_mode as select_video_mode
 from photo_metadata_agent.settings import Settings
 from photo_metadata_agent.storage.repository import Repository
 
@@ -19,7 +26,7 @@ from photo_metadata_agent.storage.repository import Repository
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
     repository = Repository(settings.database)
-    app = FastAPI(title="Photo Metadata Agent", version="0.1.0")
+    app = FastAPI(title="Photo Metadata Agent", version="0.2.0")
     # This release intentionally serves only localhost. Hosting needs authentication and CSRF.
     app.add_middleware(
         TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver"]
@@ -45,7 +52,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["Cache-Control"] = "no-store"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; style-src 'self'; img-src 'self'; "
-            "script-src 'self'; frame-ancestors 'none'; form-action 'self'"
+            "media-src 'self'; script-src 'self'; frame-ancestors 'none'; form-action 'self'"
         )
         return response
 
@@ -91,19 +98,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.post("/imports")
-    async def upload(image: UploadFile = File(...), context: str = Form("")):
+    async def upload(
+        image: UploadFile = File(...),
+        context: str = Form(""),
+        video_mode: Literal["auto", "native", "frames"] | None = Form(None),
+    ):
         if len(context) > 4000:
             raise HTTPException(422, "Context must be at most 4000 characters.")
-        content = await image.read(settings.max_upload_bytes + 1)
+        is_video = Path(image.filename or "").suffix.lower() in VIDEO_EXTENSIONS
+        limit = settings.max_video_upload_bytes if is_video else settings.max_upload_bytes
+        content = await image.read(limit + 1)
         await image.close()
         try:
-            asset_id = import_image(
-                content, image.filename or "image", "upload", settings, repository
+            spec = make_spec(settings, context)
+            if video_mode is not None:
+                spec["video_mode"] = video_mode
+            if is_video:
+                select_video_mode(spec)
+            asset_id = await run_in_threadpool(
+                import_media, content, image.filename or "image", "upload", settings, repository
             )
-            job_id = repository.enqueue(asset_id, make_spec(settings, context))
+            job_id = repository.enqueue(asset_id, spec)
+        except ProviderError as exc:
+            raise HTTPException(422, str(exc)) from exc
         except Exception as exc:
             raise HTTPException(
-                422, "Image could not be imported; check size, format and settings."
+                422, "Media could not be imported; check size, format and settings."
             ) from exc
         return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
@@ -127,6 +147,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return FileResponse(
             settings.data_dir / "previews" / f"{job['asset_id']}.jpg", media_type="image/jpeg"
         )
+
+    @app.get("/jobs/{job_id}/video")
+    def video(job_id: str):
+        job = get_job(job_id)
+        if job["media_type"] != "video":
+            raise HTTPException(404, "Not a video")
+        mime = mimetypes.guess_type(job["filename"])[0] or "application/octet-stream"
+        return FileResponse(settings.data_dir / "originals" / job["asset_id"], media_type=mime)
 
     @app.get("/api/jobs/{job_id}")
     def job_status(job_id: str):

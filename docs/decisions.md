@@ -51,3 +51,12 @@ explicit experimental opt-in; model/version is configurable and snapshotted.
 Local files plus browser uploads exercise the complete lifecycle. Google Photos Picker,
 iCloud-specific ingestion, semantic indexing, and prompt optimization are later milestones.
 No unimplemented connector is advertised as usable.
+
+## 009: Native video or timestamped frames behind the shared tagging contract
+
+Use PyAV tools from a dedicated preparation node. Prefer a native MP4 clip only when both
+the configured model and adapter support it; use a single chronological frame-sequence
+request otherwise. Keep the same tag schema and review/export workflow. Record exactly
+which footage was analyzed so evals do not compare samples as if they covered the full video.
+Native video starts with OpenRouter; the adapter boundary allows other native transports
+later. Model capability is explicit configuration and does not imply automatic discovery.

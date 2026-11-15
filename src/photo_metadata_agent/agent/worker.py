@@ -9,6 +9,7 @@ from photo_metadata_agent.agent.graph import build_graph
 from photo_metadata_agent.inference.contracts import ProviderError
 from photo_metadata_agent.settings import Settings
 from photo_metadata_agent.storage.repository import Repository
+from photo_metadata_agent.tools.video import MediaError
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,9 @@ def process_one(repository: Repository, graph) -> bool:
     except Exception as exc:
         # Do not log raw SDK exceptions, which can contain request bodies and credentials.
         message = (
-            str(exc) if isinstance(exc, ProviderError) else f"Job failed ({type(exc).__name__})."
+            str(exc)
+            if isinstance(exc, (ProviderError, MediaError))
+            else f"Job failed ({type(exc).__name__})."
         )
         repository.update(job["id"], status="failed", error=message)
         logger.warning("Job %s: %s", job["id"], message)

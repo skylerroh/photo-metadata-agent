@@ -139,3 +139,107 @@ def test_committed_schema_matches_contract():
     assert (
         json.loads(Path("configs/schemas/tags.schema.json").read_text()) == Tags.model_json_schema()
     )
+
+
+@pytest.mark.parametrize("provider", ["openai", "openrouter", "ollama"])
+def test_frame_sequence_is_sent_in_one_request(
+    provider,
+    settings,
+    image_bytes,
+    review_body,
+    monkeypatch,
+):
+    captured = {}
+
+    def fake(url, body, headers, timeout, attempts):
+        captured.update(body)
+        message = {"content": json.dumps(review_body["tags"])}
+        if provider == "ollama":
+            return {"done": True, "message": message}
+        return {"choices": [{"finish_reason": "stop", "message": message}]}
+
+    monkeypatch.setattr("photo_metadata_agent.inference.providers.chat.post_json", fake)
+    spec = make_spec(settings)
+    request = TagRequest(
+        None,
+        "",
+        spec["questions"],
+        spec["prompt"],
+        "test-model",
+        frames=((0.5, image_bytes), (10.5, image_bytes)),
+        media_context={"mode": "frames", "frame_timestamps_seconds": [0.5, 10.5]},
+    )
+    ChatTagger(provider, "http://example.test", "secret", 10, 1).tag(request)
+    if provider == "ollama":
+        assert len(captured["messages"][1]["images"]) == 2
+        assert "10.5" in captured["messages"][1]["content"]
+    else:
+        parts = captured["messages"][1]["content"]
+        assert len([p for p in parts if p["type"] == "image_url"]) == 2
+        assert any("10.500 seconds" in p.get("text", "") for p in parts)
+        assert not any(p["type"] == "video_url" for p in parts)
+
+
+def test_openrouter_native_video_uses_private_data_uri(settings, review_body, monkeypatch):
+    captured = {}
+
+    def fake(url, body, *args):
+        captured.update(body)
+        return {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": json.dumps(review_body["tags"]),
+                    },
+                }
+            ]
+        }
+
+    monkeypatch.setattr("photo_metadata_agent.inference.providers.chat.post_json", fake)
+    spec = make_spec(settings)
+    request = TagRequest(None, "", spec["questions"], spec["prompt"], "test-model", video=b"mp4")
+    ChatTagger("openrouter", "http://example.test", "secret", 10, 1).tag(request)
+    parts = captured["messages"][1]["content"]
+    assert parts[1] == {"type": "video_url", "video_url": {"url": "data:video/mp4;base64,bXA0"}}
+    assert not any(p["type"] == "image_url" for p in parts)
+    for provider in ["openai", "ollama"]:
+        with pytest.raises(ProviderError, match="sampled frames"):
+            ChatTagger(provider, "http://example.test", "secret", 10, 1).tag(request)
+    with pytest.raises(ProviderError, match="sampled frames"):
+        TypeSafeTagger("secret", 10, 1).tag(request)
+
+
+def test_jev_receives_all_timestamped_frames(settings, image_bytes, monkeypatch):
+    captured = {}
+    spec = make_spec(settings)
+
+    def fake(url, body, *args):
+        captured.update(body)
+        return {
+            "model": "jev-1.14.0",
+            "answers": {
+                name: {
+                    "choice": "unknown",
+                    "confidence": 0.9,
+                    "probabilities": {
+                        key: 1.0 if key == "unknown" else 0.0 for key in question["criteria"]
+                    },
+                }
+                for name, question in build_questions(spec["questions"]).items()
+            },
+        }
+
+    monkeypatch.setattr("photo_metadata_agent.inference.providers.typesafe.post_json", fake)
+    request = TagRequest(
+        None,
+        "",
+        spec["questions"],
+        spec["prompt"],
+        "jev-1.14.0",
+        frames=((0.5, image_bytes), (2.5, image_bytes)),
+    )
+    TypeSafeTagger("secret", 10, 1).tag(request)
+    assert len(captured["assets"]) == 2
+    assert [f["timestamp_seconds"] for f in captured["state"]["frames"]] == [0.5, 2.5]
+    assert all(f["photo"] in captured["assets"] for f in captured["state"]["frames"])

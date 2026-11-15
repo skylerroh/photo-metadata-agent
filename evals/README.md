@@ -18,3 +18,10 @@ Album context and provider responses may contain personal information; keep expo
 Use album/event groups and perceptual duplicate clusters to define train/dev/test splits
 before tuning; repeated runs and visually similar photos must stay in the same split.
 Exact file hashes alone cannot identify re-encoded or near-duplicate images.
+
+Video evaluation records also retain the selected mode, source duration, sampled timestamps
+or clip coverage, preprocessing settings, and media policy version. Compare modes on the
+same source videos, but account for their different coverage. Human people-count labels
+should use the maximum simultaneously visible within the supplied sample when measuring
+sample inference accuracy. Evaluating full-video retrieval requires separate full-video
+labels; sparse samples can miss short events. Audio is not analyzed in either mode.

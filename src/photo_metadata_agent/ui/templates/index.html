@@ -1,14 +1,19 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="intro"><p class="eyebrow">A library you can find again</p>
-<h1>Give your photos useful context.</h1>
+<h1>Give your library useful context.</h1>
 <p>Generate category tags, review every decision, and keep your corrections for better evaluations.</p></section>
-<section class="panel"><h2>Import a photo</h2>
+<section class="panel"><h2>Import a photo or video</h2>
 <p>Provider: <strong>{{ settings.provider }}</strong> · Model: {{ settings.model }}</p>
 {% if settings.provider == 'demo' %}<p class="notice">Demo mode makes no model calls. Tags start as unknown for manual annotation.</p>{% endif %}
 <form action="/imports" method="post" enctype="multipart/form-data">
-<label>Image<input type="file" name="image" accept="image/*" required></label>
+<label>Image or video<input type="file" name="image" accept="image/*,video/*" required></label>
 <label>Album or occasion context<textarea name="context" maxlength="4000" placeholder="For example: our family reunion, or a ministry trip in June"></textarea></label>
+<label>Video inference mode<select name="video_mode">
+<option value="auto" {% if settings.video_mode == 'auto' %}selected{% endif %}>Auto: use declared model capability</option>
+<option value="frames" {% if settings.video_mode == 'frames' %}selected{% endif %}>Sample frames across the video</option>
+<option value="native" {% if settings.video_mode == 'native' %}selected{% endif %}>Native video: compatible OpenRouter model required</option>
+</select></label>
 <button>Import and queue tagging</button>
 </form><p class="muted">The local worker must be running to process jobs.</p></section>
 <section><div class="section-title"><h2>Your review queue</h2><a href="/evals.jsonl">Download evaluation labels</a></div>

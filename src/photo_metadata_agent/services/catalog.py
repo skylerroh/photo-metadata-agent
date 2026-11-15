@@ -3,7 +3,9 @@ import json
 from importlib.resources import files
 from pathlib import Path
 
+from photo_metadata_agent import __version__
 from photo_metadata_agent.ingestion.local import ingest
+from photo_metadata_agent.ingestion.video import VIDEO_EXTENSIONS, ingest_video
 from photo_metadata_agent.settings import Settings
 from photo_metadata_agent.storage.repository import Repository
 
@@ -26,7 +28,9 @@ def make_spec(settings: Settings, context: str = "", questions_path: Path | None
     if set(questions["contexts"]) != set(ContextTags.model_fields):
         raise ValueError("Context questions do not match the domain schema.")
     prompt = package.joinpath("prompts/tagging.txt").read_text()
-    spec = settings.model_dump(mode="json", exclude={"data_dir", "max_upload_bytes"})
+    spec = settings.model_dump(
+        mode="json", exclude={"data_dir", "max_upload_bytes", "max_video_upload_bytes"}
+    )
     spec.update(
         {
             "context": context,
@@ -35,8 +39,8 @@ def make_spec(settings: Settings, context: str = "", questions_path: Path | None
             "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
             "questions_sha256": hashlib.sha256(question_text.encode()).hexdigest(),
             "schema_version": "1",
-            "harness_version": "0.1.0",
-            "preprocessing_version": "jpeg-v1",
+            "harness_version": __version__,
+            "preprocessing_version": "media-v2",
         }
     )
     return spec
@@ -53,4 +57,20 @@ def import_image(
         raise ValueError("Image exceeds the configured upload limit.")
     asset_id = ingest(content, filename, settings.data_dir)
     repository.add_asset(asset_id, Path(filename).name, source)
+    return asset_id
+
+
+def import_media(
+    content: bytes,
+    filename: str,
+    source: str,
+    settings: Settings,
+    repository: Repository,
+) -> str:
+    if Path(filename).suffix.lower() not in VIDEO_EXTENSIONS:
+        return import_image(content, filename, source, settings, repository)
+    if len(content) > settings.max_video_upload_bytes:
+        raise ValueError("Video exceeds the configured upload limit.")
+    asset_id = ingest_video(content, settings.data_dir)
+    repository.add_asset(asset_id, Path(filename).name, source, media_type="video")
     return asset_id

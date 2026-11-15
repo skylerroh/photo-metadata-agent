@@ -16,8 +16,16 @@ class ChatTagger:
         self.timeout, self.attempts = timeout, attempts
 
     def tag(self, request: TagRequest) -> Prediction:
-        image = base64.b64encode(request.image).decode()
-        text = json.dumps({"album_context": request.context, "questions": request.questions})
+        if request.video is not None and self.provider != "openrouter":
+            raise ProviderError("This adapter accepts sampled frames, not native video.")
+        images = [base64.b64encode(image).decode() for image in request.images()]
+        text = json.dumps(
+            {
+                "album_context": request.context,
+                "questions": request.questions,
+                "media": request.media_context,
+            }
+        )
         messages = [
             {
                 "role": "system",
@@ -27,7 +35,7 @@ class ChatTagger:
             }
         ]
         if self.provider == "ollama":
-            messages.append({"role": "user", "content": text, "images": [image]})
+            messages.append({"role": "user", "content": text, "images": images})
             body = {
                 "model": request.model,
                 "messages": messages,
@@ -36,18 +44,30 @@ class ChatTagger:
             }
             headers = {}
         else:
-            messages.append(
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": text},
+            parts = [{"type": "text", "text": text}]
+            if request.video is not None:
+                video = base64.b64encode(request.video).decode()
+                parts.append(
+                    {"type": "video_url", "video_url": {"url": f"data:video/mp4;base64,{video}"}}
+                )
+            else:
+                for index, image in enumerate(images):
+                    if request.frames:
+                        parts.append(
+                            {
+                                "type": "text",
+                                "text": (
+                                    f"Frame {index + 1} at {request.frames[index][0]:.3f} seconds"
+                                ),
+                            }
+                        )
+                    parts.append(
                         {
                             "type": "image_url",
                             "image_url": {"url": f"data:image/jpeg;base64,{image}"},
-                        },
-                    ],
-                }
-            )
+                        }
+                    )
+            messages.append({"role": "user", "content": parts})
             body = {
                 "model": request.model,
                 "messages": messages,

@@ -1,8 +1,8 @@
 # Architecture
 
-## Intention and v1 scope
+## Intention and scope
 
-Build a personal image library whose categories reflect how its owner searches:
+Build a personal image and video library whose categories reflect how its owner searches:
 number of people, capture style, and occasion context. Model suggestions are reviewable,
 portable as keyword metadata, and traceable to their exact inputs. User corrections
 produce evaluation material without replacing the original model result.
@@ -38,19 +38,19 @@ flowchart LR
 - `api` and `ui`: transport and presentation; they do not run inference in request handlers.
 
 No open-ended tool loop is needed in v1. Models cannot read directories, write metadata,
-or execute skills. A future agent-callable `tools/` package should wrap services rather
-than duplicate their implementations. `skills/` remains documentation until procedures
+or execute skills. The preparation node calls deterministic video functions in `tools/`;
+models do not choose arbitrary paths or execute code. `skills/` remains documentation until procedures
 need to be discovered or composed dynamically.
 
 ## Data model
 
 | Entity | Identity | Contents |
 | --- | --- | --- |
-| Asset | SHA-256 of original bytes | Display filename, managed original and preview |
+| Asset | SHA-256 of original bytes | Display filename, media type, managed original and preview |
 | Source | Asset ID + source reference | Local path or upload provenance |
 | Job | UUID | Asset reference, immutable experiment spec, status, prediction |
 | Review | UUID | Job reference, complete corrected tags, reviewer, notes, timestamp |
-| Graph checkpoint | Job UUID as thread ID | Execution state and interrupt/resume records |
+| Graph checkpoint | Job UUID as thread ID | Execution state, preparation manifest, and interrupts |
 
 Exact duplicate files share an asset. Each import creates a new run and retains its own
 album context, allowing the same file to be evaluated with different evidence. The first
@@ -100,6 +100,56 @@ V1 normalizes all provider inputs identically to make comparisons easier. Provid
 resolution strategies and high-resolution crops are future experiments. Original metadata
 is preserved in copied bytes but is not automatically passed to the model. Explicit album
 notes are passed to the model and snapshotted with the run.
+
+## Video lifecycle and inference modes
+
+Video ingestion probes the first video stream, confirms a finite duration (at most 24 hours)
+and a decodable frame, stores the untouched original, and generates a JPEG poster. The
+catalog migrates existing assets to `media_type=image` and records new videos explicitly;
+existing predictions, reviews, and paused image jobs remain compatible.
+
+The LangGraph `prepare` node resolves `auto`, `native`, or `frames` from the job's immutable
+configuration. Native mode requires both an implemented native transport (currently
+OpenRouter Chat Completions `video_url`) and an explicit model capability flag. Auto uses
+frames otherwise. This is configuration-based capability selection, not a claim that all
+OpenRouter models support video. Explicit unsupported native mode fails before inference.
+There is no silent retry with a different modality after a provider failure.
+
+The graph calls these reusable local-file tools:
+
+- `probe_video(path)`: duration and encoded dimensions; reject invalid or unbounded inputs.
+- `sample_video_frames(path, output_dir, count, max_side)`: seek to uniform bin centers
+  across the full timeline, save normalized JPEGs, and record actual decoded timestamps.
+  Duplicate timestamps are deduplicated for very short videos.
+- `downscale_video(path, output_dir, start_seconds, max_seconds, max_side, fps, max_bytes)`:
+  seek to a bounded window, decode once, resample a constant-rate silent H.264 MP4,
+  and atomically replace the prepared clip after checking its size. Display-matrix
+  rotation is applied to the pixels; the original is never overwritten.
+
+PyAV wheels supply FFmpeg libraries; no shell command or user-installed FFmpeg executable
+is required. Uploaded media never becomes a shell argument. Native output defaults to
+30 seconds, 4 FPS, and 768 pixels on the longest side, capped at 20 MiB; frame mode defaults
+to eight 768-pixel JPEGs with minimum-dimension padding for Jev. Video input defaults to
+250 MiB. Audio, subtitles, and source metadata are not copied into inference derivatives.
+Constant-rate encoding can round clip duration upward by less than one output-frame period;
+requested coverage and encoded duration are separately recorded.
+
+Preparation results contain artifact paths plus source duration, selected mode, timestamps
+or clip window, limits, and policy version. The graph checkpoints this manifest, not binary
+media, then passes bytes to the adapter at inference time. `Prediction.preparation` and the
+JSONL evaluation record retain provenance. Provider requests exclude local artifact paths.
+
+Sampled frames are sent together in chronological order for one video-level prediction:
+interleaved timestamps and image parts for chat adapters, a timestamped frame list with
+image asset references for Jev, and an image list plus timing metadata for Ollama. Native
+mode sends a private MP4 data URI through OpenRouter; it does not publish an upload URL.
+
+Video people count is the maximum simultaneously visible in the provided footage, not
+unique identities summed across time. Capture style may be mixed across scenes. The policy
+explicitly limits conclusions to the provided sample, which may miss activity between
+frames or outside a native clip. Every result still requires review. The browser uses the
+original video for review, subject to browser codec support; inference always uses prepared
+visual derivatives with no audio analysis.
 
 ## Queue and graph execution
 

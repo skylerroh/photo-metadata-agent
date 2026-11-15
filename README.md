@@ -1,10 +1,10 @@
 # Photo Metadata Agent
 
-A personal photo tagging and review tool for finding the right image later.
+A personal photo and video tagging and review tool for finding the right image later.
 
 Photo libraries know when an image was taken, but often miss the context you remember:
 *a candid photo with four to six people from a family gathering*, or *a group shot from
-a ministry trip*. This project uses an image plus optional album or occasion notes to
+a ministry trip*. This project uses images or video samples plus optional album or occasion notes to
 suggest consistent metadata categories. You verify the suggestions, correct mistakes,
 and export searchable keywords alongside a record of how each decision was made.
 
@@ -18,13 +18,20 @@ and harness evaluations.
 
 ```mermaid
 flowchart TD
-    Local[Local image or directory] --> Import[Validate and copy original]
+    Local[Local image, video, or directory] --> Import[Validate and copy original]
     Upload[Browser upload] --> Import
     Import --> Prepare[Create upright JPEG preview]
     Notes[Album or occasion notes] --> Queue
     Prepare --> Queue[Queue job with versioned configuration]
     Queue --> Worker[Local LangGraph worker]
-    Worker --> Provider{Configured tagger}
+    Worker --> Media{Media preparation}
+    Media --> Still[Image preview]
+    Media --> Mode{Video mode and model capability}
+    Mode --> Native[Downscaled native video clip]
+    Mode --> Frames[Timestamped frames across the video]
+    Still --> Provider{Configured tagger}
+    Native --> Provider
+    Frames --> Provider
     Provider --> Jev[TypeSafe Jev]
     Provider --> Chat[OpenAI or OpenRouter]
     Provider --> Ollama[Local Ollama]
@@ -43,12 +50,13 @@ flowchart TD
     Evals -. Evaluate and revise .-> Queue
 ```
 
-All imported images go through human review in v1. The UI and worker are separate
+All imported images and videos go through human review. The UI and worker are separate
 processes; closing the browser does not discard queued work or pending reviews.
 
-## What v1 does
+## What it does
 
-- Import a local image/directory through the CLI, or upload one image through the UI.
+- Import local images, videos, or directories through the CLI, or upload media through the UI.
+- Route video jobs to native-video or sampled-frame inference with reusable preparation tools.
 - Preserve original bytes in managed storage and deduplicate exact files by SHA-256.
 - Suggest people-count, capture-style, and independent context labels.
 - Run a durable LangGraph inference → review workflow with SQLite checkpoints.
@@ -95,7 +103,7 @@ To import an entire directory:
 uv run photo-agent import /absolute/path/to/photos --context "Family reunion, July 2026"
 ```
 
-The importer scans supported image extensions recursively. Invalid files are skipped
+The importer scans supported image and video extensions recursively. Invalid files are skipped
 with a failure count and a nonzero exit status; successfully queued files remain available.
 Each import creates a new tagging run, even when the underlying asset already exists.
 
@@ -105,9 +113,85 @@ JPEG, PNG, WebP, and TIFF still images are supported. For HEIC/HEIF:
 uv sync --extra dev --extra heic
 ```
 
-Animated images and videos are outside v1. Inference previews have upright pixels,
+MP4, MOV, M4V, MKV, WebM, and AVI video files are also supported when their codecs are
+decodable by PyAV. Animated images remain unsupported. Inference previews have upright pixels,
 no EXIF metadata, and dimensions compatible with Jev's documented image limits.
 Originals retain their original bytes and metadata.
+
+## Tag videos
+
+Video import uses the same review, search, XMP export, and evaluation workflow as images.
+Install dependencies with `uv sync`; PyAV wheels bundle FFmpeg libraries, so no separate
+`ffmpeg` or `ffprobe` command is required. Unsupported codecs or files with no decodable
+video stream/known duration fail visibly. Originals are preserved, including their audio.
+
+Choose a mode in the upload form, through `--video-mode` on CLI imports, or with
+`PHOTO_AGENT_VIDEO_MODE` in `.env`:
+
+| Mode | What the model receives |
+| --- | --- |
+| `auto` (default) | Native clip only if the adapter and declared model capability support it; otherwise sampled frames |
+| `native` | A silent H.264 MP4 clip, downscaled and resampled to bounded duration/FPS |
+| `frames` | A chronological sequence of downscaled JPEGs with timestamps, uniformly sampled across the full video |
+
+Native video is implemented through the OpenRouter adapter. Set
+`PHOTO_AGENT_MODEL_SUPPORTS_VIDEO=true` **only for a model that supports both video input
+and structured output**. Capabilities are declared per configured model, not guessed from
+model names or discovered through network calls. Jev, OpenAI, and Ollama use sampled frames
+through their current adapters. Explicit native mode on an unsupported adapter fails before
+sending media; a failed native request does not silently trigger a second billed frame request.
+Sampled mode requires a vision model that accepts multiple images in a single request.
+
+```bash
+# Use any of the existing vision adapters with timestamped frame samples.
+uv run photo-agent import /path/to/video.mp4 --video-mode frames
+
+# A compatible OpenRouter model can receive a prepared MP4 directly.
+uv run photo-agent import /path/to/video.mp4 --provider openrouter \
+  --model your-video-capable-model --model-supports-video --video-mode native
+```
+
+Defaults: **8 frames** across the full video, or a native clip from the **first 30 seconds**
+at **4 FPS**, with longest side at most **768 pixels**. Native audio is stripped. Frame
+images are padded to a 280-pixel minimum dimension for Jev compatibility. Native clip
+output is capped at 20 MiB; video imports at 250 MiB (image imports retain their 25 MiB
+limit). Configure these limits in `.env`:
+
+```dotenv
+PHOTO_AGENT_VIDEO_MODE=auto
+PHOTO_AGENT_MODEL_SUPPORTS_VIDEO=false
+PHOTO_AGENT_VIDEO_FRAME_COUNT=8
+PHOTO_AGENT_VIDEO_MAX_SIDE=768
+PHOTO_AGENT_VIDEO_START_SECONDS=0
+PHOTO_AGENT_VIDEO_MAX_SECONDS=30
+PHOTO_AGENT_VIDEO_FPS=4
+PHOTO_AGENT_VIDEO_MAX_BYTES=20971520
+PHOTO_AGENT_MAX_VIDEO_UPLOAD_BYTES=262144000
+```
+
+Start/duration/FPS settings apply to native mode; frame mode samples the entire timeline.
+A preparation node calls deterministic tools in
+[`tools/video.py`](src/photo_metadata_agent/tools/video.py): `probe_video`,
+`sample_video_frames`, and `downscale_video`. You can run preparation independently:
+
+```bash
+uv run photo-agent prepare-video /path/to/video.mp4 --output data/samples/frames \
+  --mode frames --frames 8 --max-side 768
+uv run photo-agent prepare-video /path/to/video.mp4 --output data/samples/clip \
+  --mode native --start 10 --seconds 20 --fps 4 --max-side 768
+```
+
+Each tool returns artifact paths and timing/coverage metadata. Jobs keep a preparation
+manifest under `data/prepared/JOB_ID/` and include it in predictions/evaluation exports.
+Only media bytes and timing/coverage information are sent to providers; local paths are
+not included in their requests. The review UI plays the original video (when its codec
+is browser-compatible) and explains what sample the model saw.
+
+For videos, **people count means the maximum simultaneously visible in the supplied
+footage**, not the number of unique people across time. Capture style can be mixed
+across scenes. Sparse frames and trimmed clips can miss events; tags describe the sample
+and need human verification against the original. Both modes currently use visual
+content only, with no transcription or audio-based tags.
 
 ## Choose a provider
 
@@ -178,7 +262,8 @@ See [`evals/README.md`](evals/README.md) for the annotation and comparison workf
 ```text
 src/photo_metadata_agent/
   domain/       Canonical annotation contracts
-  ingestion/    Image validation, normalization, managed copies
+  ingestion/    Image/video validation, normalization, managed copies
+  tools/        Video probing, uniform frame sampling, bounded MP4 encoding
   inference/    Tagger interface and provider adapters
   agent/        LangGraph workflow and durable worker
   services/     Import, run specification, evaluation operations
@@ -218,7 +303,7 @@ lock prevents conflicting recovery attempts. `worker --once` processes at most o
 
 The UI uses FastAPI and server-rendered templates with a small JavaScript status poller.
 It binds to loopback, rejects unrecognized hosts and cross-origin mutations, and keeps
-provider keys on the server. Local execution still sends the prepared image and album
+provider keys on the server. Local execution still sends the prepared images/video and album
 notes to the selected remote provider; use demo or a local Ollama server for local-only
 processing. Catalogs, originals, responses, notes, and evaluation exports may contain
 personal information and are gitignored under `data/`.

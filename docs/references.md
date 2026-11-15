@@ -17,3 +17,9 @@ selecting or upgrading a provider/model.
 - [ExifTool XMP tags](https://exiftool.org/TagNames/XMP.html)
 - [Google Photos API release notes](https://developers.google.com/photos/support/release-notes)
 - [Apple Photos export](https://support.apple.com/en-au/guide/photos/-pht6e157c5f/mac)
+
+Video implementation references checked November 15, 2026:
+
+- [OpenRouter video input formats](https://openrouter.ai/docs/guides/overview/multimodal/videos)
+- [PyAV container seeking and decoding](https://pyav.basswood.io/docs/stable/api/container.html)
+- [PyAV encoding examples](https://pyav.basswood.io/docs/stable/cookbook/basics.html)

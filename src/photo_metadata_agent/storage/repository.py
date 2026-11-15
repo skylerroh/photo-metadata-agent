@@ -27,7 +27,6 @@ CREATE TABLE IF NOT EXISTS reviews (
  created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status);
-PRAGMA user_version=1;
 """
 
 
@@ -36,7 +35,14 @@ class Repository:
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
+            if db.execute("PRAGMA user_version").fetchone()[0] > 2:
+                raise ValueError("Catalog schema is newer than this application supports.")
             db.executescript(DDL)
+            db.execute("BEGIN IMMEDIATE")
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(assets)")}
+            if "media_type" not in columns:
+                db.execute("ALTER TABLE assets ADD COLUMN media_type TEXT NOT NULL DEFAULT 'image'")
+            db.execute("PRAGMA user_version=2")
 
     @contextmanager
     def connect(self):
@@ -46,10 +52,11 @@ class Repository:
             db.execute("PRAGMA journal_mode=WAL")
             yield db
 
-    def add_asset(self, asset_id: str, filename: str, source: str):
+    def add_asset(self, asset_id: str, filename: str, source: str, media_type: str = "image"):
         with self.connect() as db:
             db.execute(
-                "INSERT OR IGNORE INTO assets(id,filename) VALUES (?,?)", (asset_id, filename)
+                "INSERT OR IGNORE INTO assets(id,filename,media_type) VALUES (?,?,?)",
+                (asset_id, filename, media_type),
             )
             db.execute("INSERT OR IGNORE INTO sources VALUES (?,?)", (asset_id, source))
 
@@ -65,7 +72,8 @@ class Repository:
     def job(self, job_id: str) -> dict:
         with self.connect() as db:
             row = db.execute(
-                "SELECT j.*, a.filename FROM jobs j JOIN assets a ON a.id=j.asset_id WHERE j.id=?",
+                "SELECT j.*, a.filename, a.media_type FROM jobs j "
+                "JOIN assets a ON a.id=j.asset_id WHERE j.id=?",
                 (job_id,),
             ).fetchone()
             if row is None:

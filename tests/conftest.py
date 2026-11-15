@@ -41,3 +41,23 @@ def review_body():
         },
         "notes": "Corrected after visual inspection.",
     }
+
+
+@pytest.fixture
+def video_path(tmp_path):
+    """A real short MP4 with temporal color changes; no external encoder executable."""
+    import av
+
+    path = tmp_path / "source.mp4"
+    with av.open(str(path), "w") as output:
+        stream = output.add_stream("libx264", rate=10)
+        stream.width, stream.height = 640, 360
+        stream.pix_fmt = "yuv420p"
+        for index in range(20):
+            color = "red" if index < 10 else "blue"
+            frame = av.VideoFrame.from_image(Image.new("RGB", (640, 360), color))
+            for packet in stream.encode(frame):
+                output.mux(packet)
+        for packet in stream.encode():
+            output.mux(packet)
+    return path
