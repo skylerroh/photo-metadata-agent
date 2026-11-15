@@ -39,6 +39,7 @@ class Prediction(Contract):
     tags: Tags
     scores: dict[str, float] = Field(default_factory=dict)
     raw: dict = Field(default_factory=dict)
+    preparation: dict = Field(default_factory=dict)
     latency_ms: float = Field(default=0, ge=0)
     resolved_model: str
 

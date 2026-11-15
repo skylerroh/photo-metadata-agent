@@ -39,21 +39,34 @@ class TypeSafeTagger:
         self.key, self.timeout, self.attempts = key, timeout, attempts
 
     def tag(self, request: TagRequest) -> Prediction:
-        reference = str(uuid4())
+        if request.video is not None:
+            raise ProviderError("Jev requires sampled frames rather than native video.")
+        references = [str(uuid4()) for _ in request.images()]
+        assets = {
+            reference: {
+                "type": "image",
+                "format": "jpg",
+                "data_base64": (base64.b64encode(image).decode()),
+            }
+            for reference, image in zip(references, request.images(), strict=True)
+        }
+        state = {"album_context": request.context}
+        if request.frames:
+            state["frames"] = [
+                {"photo": reference, "timestamp_seconds": timestamp}
+                for reference, (timestamp, _) in zip(references, request.frames, strict=True)
+            ]
+            state["media"] = request.media_context
+        else:
+            state["photo"] = references[0]
         questions = build_questions(request.questions)
         # The same policy applies to every atomic question, not just the chat adapters.
         for question in questions.values():
             question["instructions"] = request.prompt + "\n" + question["instructions"]
         body = {
             "model": request.model,
-            "state": {"photo": reference, "album_context": request.context},
-            "assets": {
-                reference: {
-                    "type": "image",
-                    "format": "jpg",
-                    "data_base64": base64.b64encode(request.image).decode(),
-                }
-            },
+            "state": state,
+            "assets": assets,
             "questions": questions,
         }
         raw = post_json(

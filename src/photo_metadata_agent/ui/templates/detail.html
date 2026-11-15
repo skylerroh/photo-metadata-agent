@@ -3,7 +3,16 @@
 <a href="/">← Back to library</a>
 <div class="section-title"><h1>{{ job.filename }}</h1><span class="badge">{{ job.status | replace('_', ' ') }}</span></div>
 <div class="review-layout" data-status="{{ job.status }}" data-job-id="{{ job.id }}">
-<section><img class="review-image" src="/jobs/{{ job.id }}/preview" alt="Photo being reviewed">
+<section>
+{% if job.media_type == 'video' %}
+<video class="review-image" controls preload="metadata" poster="/jobs/{{ job.id }}/preview" src="/jobs/{{ job.id }}/video">Your browser cannot play this video format.</video>
+<p>Video tags describe the supplied sample. People count means the maximum simultaneously visible, not unique people over time.</p>
+{% else %}<img class="review-image" src="/jobs/{{ job.id }}/preview" alt="Photo being reviewed">{% endif %}
+{% if job.prediction and job.prediction.preparation and job.prediction.preparation.mode != 'image' %}
+<p class="notice">Inference used {{ job.prediction.preparation.mode }} mode. Audio was excluded.
+{% if job.prediction.preparation.mode == 'frames' %}{{ job.prediction.preparation.frames | length }} frames sampled across the video.
+{% else %}Clip starting at {{ job.prediction.preparation.start_seconds }}s, covering {{ job.prediction.preparation.duration_seconds }}s.{% endif %}</p>
+{% endif %}
 <p><strong>Album context:</strong> {{ job.spec.context or 'None supplied' }}</p>
 <p class="muted">{{ job.spec.provider }} · {{ job.spec.model }}</p>
 {% if job.spec.provider == 'demo' %}<p class="notice">Demo run: no inference was performed.</p>{% endif %}

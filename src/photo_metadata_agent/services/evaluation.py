@@ -15,6 +15,7 @@ def records(repository: Repository) -> list[dict]:
             {
                 "asset_id": job["asset_id"],
                 "job_id": job_id,
+                "media_type": job.get("media_type", "image"),
                 "group": job["spec"]["context"],
                 "spec": job["spec"],
                 "prediction": job["prediction"],

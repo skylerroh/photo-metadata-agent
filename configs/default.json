@@ -5,5 +5,14 @@
   "data_dir": "./data",
   "typesafe_images_enabled": false,
   "max_attempts": 2,
-  "timeout_seconds": 120
+  "timeout_seconds": 120,
+  "video_mode": "auto",
+  "model_supports_video": false,
+  "video_frame_count": 8,
+  "video_max_side": 768,
+  "video_start_seconds": 0,
+  "video_max_seconds": 30,
+  "video_fps": 4,
+  "video_max_bytes": 20971520,
+  "max_video_upload_bytes": 262144000
 }
