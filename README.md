@@ -70,53 +70,163 @@ processes; closing the browser does not discard queued work or pending reviews.
 metadata writes, cloud-library tag synchronization, semantic/vector search, automatic
 prompt optimization, or an authenticated hosted deployment.
 
-## Quick start
+## Run against a directory
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/). Commands below run from the
-repository root. `uv sync` can install a suitable Python interpreter if needed.
-
-```bash
-uv sync --python 3.12 --extra dev
-cp .env.example .env
-```
-
-Start the UI in one terminal:
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/). Run these commands from the
+repository root. Installation can provision Python 3.12 if needed:
 
 ```bash
-uv run photo-agent serve
+cd /path/to/photo-metadata-agent
+uv sync --locked --python 3.12
 ```
 
-Start the worker in another terminal, from the same directory:
+Create `.env` from `.env.example` if you do not already have one. This command preserves
+an existing `.env`:
+
+```bash
+cp -n .env.example .env
+```
+
+**Configure a real provider before importing if you want generated tags.** The default
+`demo` provider performs no inference and returns unknown tags for manual annotation.
+For example, to use an already running local Ollama server and an installed vision model:
+
+```dotenv
+PHOTO_AGENT_PROVIDER=ollama
+PHOTO_AGENT_MODEL=your-installed-vision-model
+PHOTO_AGENT_OLLAMA_URL=http://localhost:11434
+```
+
+Replace the model placeholder with the actual installed model ID. For Jev, OpenAI, or
+OpenRouter, use the corresponding example in [`configs/providers/`](configs/providers/)
+and supply its API key. Set the provider and model together. See [Choose a provider](#choose-a-provider).
+
+**1. Import and queue the directory.** Context is optional, but helps with occasion labels:
+
+```bash
+uv run photo-agent import "/absolute/path/to/images" \
+  --context "Family reunion, July 2026"
+```
+
+The importer scans subdirectories recursively for supported images **and videos**. It
+copies originals into managed storage and prints the job IDs it queues; importing alone
+does not run inference. Each import creates a new run, including for previously imported
+files. Original bytes are deduplicated. An import exits with a nonzero status if any file
+fails or no supported files are queued; successfully queued files remain available.
+
+**2. Start the worker** in a terminal from the repository root:
 
 ```bash
 uv run photo-agent worker
 ```
 
-Open [http://127.0.0.1:8000](http://127.0.0.1:8000). Upload a photo, wait for the worker,
-review the categories, and save. In demo mode, no model call occurs; all initial tags
-are unknown. After the worker saves your review, download the XMP sidecar from the
-photo page.
+The worker processes queued jobs and leaves each ready for human review. It keeps running
+and waits for new jobs or submitted reviews. Stop it with Ctrl+C when finished. Use
+`worker --once` to process at most one queued import or review resume and then exit;
+it does not drain the whole directory.
 
-To import an entire directory:
-
-```bash
-uv run photo-agent import /absolute/path/to/photos --context "Family reunion, July 2026"
-```
-
-The importer scans supported image and video extensions recursively. Invalid files are skipped
-with a failure count and a nonzero exit status; successfully queued files remain available.
-Each import creates a new tagging run, even when the underlying asset already exists.
-
-JPEG, PNG, WebP, and TIFF still images are supported. For HEIC/HEIF:
+**3. Start the review UI** in a second terminal from the same repository root:
 
 ```bash
-uv sync --extra dev --extra heic
+uv run photo-agent serve
 ```
 
-MP4, MOV, M4V, MKV, WebM, and AVI video files are also supported when their codecs are
-decodable by PyAV. Animated images remain unsupported. Inference previews have upright pixels,
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000). Verify or adjust each image/video's
+tags, then save. Keep the worker running so it can persist submitted reviews. Afterward,
+download XMP keywords from the media page or use `photo-agent export JOB_ID`. Neither
+inference nor review automatically modifies metadata in your source directory.
+
+By default, `.env` is read from the current working directory and all state lives in
+`./data`. Run the UI, importer, and worker from the same repository directory. For a
+custom data directory, place the global `--data-dir` option **before** the subcommand
+and use the same absolute path for each process:
+
+```bash
+uv run photo-agent --data-dir "/absolute/path/to/catalog" import "/path/to/images"
+uv run photo-agent --data-dir "/absolute/path/to/catalog" worker
+# In a second terminal:
+uv run photo-agent --data-dir "/absolute/path/to/catalog" serve --port 8080
+```
+
+For the custom port, open [http://127.0.0.1:8080](http://127.0.0.1:8080). The UI stays
+bound to localhost. CLI import options override `.env` for those newly queued jobs;
+the worker uses each job's snapshotted provider/model settings. Provider keys are read
+when the worker executes the job. Restart the UI after editing `.env` for future uploads.
+
+JPEG, PNG, WebP, and TIFF still images are supported. Add HEIC/HEIF decoding with:
+
+```bash
+uv sync --locked --extra heic
+```
+
+MP4, MOV, M4V, MKV, WebM, and AVI video files are supported when their codecs are decodable
+by PyAV. Animated images remain unsupported. Inference previews have upright pixels,
 no EXIF metadata, and dimensions compatible with Jev's documented image limits.
 Originals retain their original bytes and metadata.
+
+## Command reference
+
+All commands below follow `uv run photo-agent`. Use `--help` at the root or after any
+subcommand to inspect the installed CLI:
+
+```bash
+uv run photo-agent --help
+uv run photo-agent import --help
+uv run photo-agent prepare-video --help
+```
+
+| Command | Purpose and options |
+| --- | --- |
+| `import PATH` | Queue one file or recursively scan a directory. `--context TEXT` supplies occasion notes (maximum 4,000 characters); `--questions PATH` loads a custom question JSON file; `--provider NAME` and `--model ID` override the configured provider/model; `--video-mode auto\|native\|frames` overrides video routing; `--model-supports-video` declares native-video support for the selected model. |
+| `worker` | Process queued jobs continuously. `--once` processes at most one queued job or review resume and exits. Only one worker can own a catalog. |
+| `serve` | Start the localhost review UI. `--port PORT` defaults to `8000`. |
+| `prepare-video PATH --output DIR` | Prepare media without queuing inference. `--mode frames\|native` defaults to `frames`; `--frames N` defaults to `8` (1–32); `--max-side PX` defaults to `768` (280–1568); native options are `--start SECONDS` (default `0`), `--seconds SECONDS` (default `30`, maximum `300`), and `--fps N` (default `4`, 1–30). |
+| `export JOB_ID` | Write reviewed XMP keywords under the configured data directory's `exports/` folder and print the path. Requires a saved human review. |
+| `evals` | Print descriptive metrics for reviewed runs. `--output PATH` additionally writes prediction/annotation JSONL. |
+| `schema` | Generate the canonical tagging JSON Schema. `--output PATH` defaults to `configs/schemas/tags.schema.json`. |
+
+Global option: `--data-dir DIR` overrides `PHOTO_AGENT_DATA_DIR` and must precede the
+subcommand. Provider names are `demo`, `typesafe`, `openai`, `openrouter`, and `ollama`.
+There is no image-only filter flag: use an image-only input directory when you want to
+exclude videos from a recursive import. Standalone `prepare-video` options are its own
+CLI defaults; it does not inherit the `PHOTO_AGENT_VIDEO_*` preparation settings.
+
+Additional examples:
+
+```bash
+# Queue a single image using the provider configured in .env.
+uv run photo-agent import "/path/to/photo.jpg"
+
+# Override provider/model and question instructions for a directory experiment.
+uv run photo-agent import "/path/to/images" --provider openrouter \
+  --model provider/your-vision-model --questions "/path/to/questions-v2.json"
+
+# Export reviewed keywords and evaluation records.
+uv run photo-agent export JOB_ID
+uv run photo-agent evals --output data/evals/reviewed.jsonl
+
+# Regenerate a schema at a custom location.
+uv run photo-agent schema --output data/schemas/tags.schema.json
+```
+
+Settings not exposed as CLI flags are read from `.env` or the process environment.
+Process environment variables take precedence over `.env`:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `PHOTO_AGENT_DATA_DIR` | `./data` | Shared catalog, checkpoints, originals, previews, and exports. |
+| `PHOTO_AGENT_PROVIDER` | `demo` | Provider for newly queued jobs. |
+| `PHOTO_AGENT_MODEL` | `demo-v1` | Model ID; set this together with a real provider. |
+| `PHOTO_AGENT_OLLAMA_URL` | `http://localhost:11434` | Ollama server base URL. |
+| `PHOTO_AGENT_TYPESAFE_IMAGES_ENABLED` | `false` | Explicit opt-in required for Jev image/frame input. |
+| `PHOTO_AGENT_TIMEOUT_SECONDS` | `120` | Provider HTTP timeout (greater than 0, at most 600 seconds). |
+| `PHOTO_AGENT_MAX_ATTEMPTS` | `2` | Total HTTP attempts, including the first (1–5). |
+| `PHOTO_AGENT_MAX_UPLOAD_BYTES` | `26214400` | Per-image import limit: 25 MiB. |
+| `PHOTO_AGENT_MAX_VIDEO_UPLOAD_BYTES` | `262144000` | Per-video import limit: 250 MiB. |
+
+Remote credentials are `TYPESAFE_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`,
+according to the selected provider. Keep them in `.env` or the worker's environment.
+See [Tag videos](#tag-videos) for all video mode and preprocessing settings.
 
 ## Tag videos
 
